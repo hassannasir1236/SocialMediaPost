@@ -44,10 +44,10 @@ Route::get('auth/{provider}/callback', [SocialAuthController::class, 'callback']
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
-Route::get('/auth/{provider}', [SocialPostAuthController::class, 'redirect'])->name('social.auth');
-Route::get('/auth/{provider}/callback', [SocialPostAuthController::class, 'callback']);
+
 Route::prefix('social')->middleware(['auth:api'])->group(function () {
-   
+    Route::get('/auth/{provider}', [SocialPostAuthController::class, 'redirect'])->name('social.auth');
+    Route::get('/auth/{provider}/callback', [SocialPostAuthController::class, 'callback'])->name('social.auth.callback');
     Route::post('/post/{provider}', [SocialPostController::class, 'post'])->name('social.post');
 });
 

@@ -11,53 +11,50 @@ class SocialPostController extends Controller
 {
     public function post(Request $request, $provider)
     {
-        $socialAccount = SocialAccount::where('user_id', Auth::id())->where('provider', $provider)->first();
+        $user = Auth::user();
+        $socialAccount = SocialAccount::where('user_id', $user->id)->where('provider', $provider)->first();
 
         if (!$socialAccount) {
-            return response()->json(['error' => 'Account not connected'], 401);
+            return response()->json(['error' => ucfirst($provider) . ' account not connected'], 400);
         }
 
         $accessToken = $socialAccount->access_token;
 
-        if ($provider == 'facebook') {
-            $url = "https://graph.facebook.com/v18.0/me/feed";
-            $response = Http::post($url, [
-                'message'      => $request->input('message'),
-                'access_token' => $accessToken,
-            ]);
-        } elseif ($provider == 'twitter') {
-            $url = "https://api.twitter.com/2/tweets";
-            $response = Http::withHeaders([
-                'Authorization' => "Bearer $accessToken",
-            ])->post($url, [
-                'text' => $request->input('message'),
-            ]);
-        } elseif ($provider == 'youtube') {
-            $videoPath = $request->file('video')->store('videos', 'public');
-
-            $response = Http::withToken($accessToken)->attach(
-                'video', file_get_contents(storage_path("app/public/$videoPath")), 'video.mp4'
-            )->post("https://www.googleapis.com/upload/youtube/v3/videos", [
-                'part'       => 'snippet,status',
-                'snippet'    => [
-                    'title'       => $request->input('title'),
-                    'description' => $request->input('description'),
-                    'tags'        => explode(',', $request->input('tags')),
-                    'categoryId'  => '22', // Example: People & Blogs
-                ],
-                'status' => [
-                    'privacyStatus' => 'public', // Can be 'private' or 'unlisted'
-                ],
-            ]);
+        if ($provider === 'youtube') {
+            return $this->postToYouTube($accessToken, $request);
+        } elseif ($provider === 'facebook') {
+            return $this->postToFacebook($accessToken, $request);
+        } elseif ($provider === 'twitter') {
+            return $this->postToTwitter($accessToken, $request);
         } else {
-            return response()->json(['error' => 'Invalid provider'], 400);
+            return response()->json(['error' => 'Unsupported provider'], 400);
+        }
+    }
+
+    private function postToYouTube($accessToken, Request $request)
+    {
+        $video = $request->file('video');
+        $title = $request->input('title', 'Default Title');
+        $description = $request->input('description', 'Default Description');
+
+        $response = Http::withToken($accessToken)->attach(
+            'video', file_get_contents($video->getPathname()), $video->getClientOriginalName()
+        )->post('https://www.googleapis.com/upload/youtube/v3/videos', [
+            'part' => 'snippet,status',
+            'snippet' => [
+                'title' => $title,
+                'description' => $description,
+            ],
+            'status' => [
+                'privacyStatus' => 'public',
+            ],
+        ]);
+
+        if ($response->failed()) {
+            return response()->json(['error' => 'Failed to upload video to YouTube'], 500);
         }
 
-        if ($response->successful()) {
-            return response()->json(['success' => 'Post published!']);
-        }
-
-        return response()->json(['error' => 'Post failed'], 500);
+        return response()->json(['message' => 'Video uploaded successfully!', 'data' => $response->json()]);
     }
 }
 
