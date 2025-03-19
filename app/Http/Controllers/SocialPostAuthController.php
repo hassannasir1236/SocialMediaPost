@@ -18,33 +18,33 @@ class SocialPostAuthController extends Controller
 
         $redirectUri = route('social.auth.callback', ['provider' => $provider]);
 
-        if ($provider == 'facebook') {
-            $url = "https://www.facebook.com/v18.0/dialog/oauth?" . http_build_query([
+        $authUrls = [
+            'facebook' => "https://www.facebook.com/v18.0/dialog/oauth?" . http_build_query([
                 'client_id'     => env('FACEBOOK_APP_ID'),
                 'redirect_uri'  => $redirectUri,
                 'scope'         => 'publish_to_groups,pages_show_list,pages_manage_posts',
                 'response_type' => 'code',
-            ]);
-        } elseif ($provider == 'twitter') {
-            $url = "https://api.twitter.com/oauth/authorize?" . http_build_query([
+            ]),
+            'twitter' => "https://api.twitter.com/oauth/authorize?" . http_build_query([
                 'client_id'    => env('TWITTER_CLIENT_ID'),
                 'redirect_uri' => $redirectUri,
                 'response_type' => 'code',
                 'scope'         => 'tweet.read tweet.write users.read offline.access',
-            ]);
-        } elseif ($provider == 'youtube') {
-            $url = "https://accounts.google.com/o/oauth2/auth?" . http_build_query([
+            ]),
+            'youtube' => "https://accounts.google.com/o/oauth2/auth?" . http_build_query([
                 'client_id'     => env('YOUTUBE_CLIENT_ID'),
                 'redirect_uri'  => $redirectUri,
                 'response_type' => 'code',
                 'scope'         => 'https://www.googleapis.com/auth/youtube.upload',
                 'access_type'   => 'offline',
-            ]);
-        } else {
-            return response()->json(['error' => 'Invalid provider'], 404);
+            ]),
+        ];
+
+        if (!isset($authUrls[$provider])) {
+            return response()->json(['error' => 'Invalid provider'], 400);
         }
 
-        return redirect($url);
+        return response()->json(['auth_url' => $authUrls[$provider]]);
     }
 
     public function callback(Request $request, $provider)
@@ -56,7 +56,7 @@ class SocialPostAuthController extends Controller
 
         $code = $request->get('code');
         if (!$code) {
-            return redirect('/')->with('error', 'Authentication failed!');
+            return response()->json(['error' => 'Authorization code missing'], 400);
         }
 
         // Define token URL for the provider
@@ -82,16 +82,20 @@ class SocialPostAuthController extends Controller
         ]);
 
         if (!$response->successful()) {
-            return redirect('/')->with('error', 'Authentication failed!');
+            return response()->json(['error' => 'Failed to authenticate with ' . ucfirst($provider)], 400);
         }
 
         $data = $response->json();
-        $accessToken = $data['access_token'];
+        $accessToken = $data['access_token'] ?? null;
         $refreshToken = $data['refresh_token'] ?? null;
 
+        if (!$accessToken) {
+            return response()->json(['error' => 'Access token not received'], 400);
+        }
+
         // Store or update social account details linked to the authenticated user
-        SocialAccount::updateOrCreate(
-            ['user_id' => '1', 'provider' => $provider],
+        $socialAccount = SocialAccount::updateOrCreate(
+            ['user_id' => Auth::id(), 'provider' => $provider],
             [
                 'provider_user_id' => $data['user_id'] ?? '',
                 'access_token' => $accessToken,
@@ -99,6 +103,9 @@ class SocialPostAuthController extends Controller
             ]
         );
 
-        return redirect('/')->with('success', ucfirst($provider) . ' account connected!');
+        return response()->json([
+            'message' => ucfirst($provider) . ' account connected successfully!',
+            'social_account' => $socialAccount
+        ], 200);
     }
 }
