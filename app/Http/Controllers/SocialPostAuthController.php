@@ -11,10 +11,9 @@ class SocialPostAuthController extends Controller
 {
     public function redirect($provider)
     {
-        // Ensure user is logged in
-        if (!Auth::check()) {
-            return response()->json(['error' => 'User not authenticated'], 401);
-        }
+        // if (!Auth::check()) {
+        //     return response()->json(['error' => 'User not authenticated'], 401);
+        // }
 
         $redirectUri = route('social.auth.callback', ['provider' => $provider]);
 
@@ -36,7 +35,8 @@ class SocialPostAuthController extends Controller
                 'redirect_uri'  => $redirectUri,
                 'response_type' => 'code',
                 'scope'         => 'https://www.googleapis.com/auth/youtube.upload',
-                'access_type'   => 'offline',
+                'access_type'   => 'offline',  
+                'prompt'        => 'consent', 
             ]),
         ];
 
@@ -44,36 +44,29 @@ class SocialPostAuthController extends Controller
             return response()->json(['error' => 'Invalid provider'], 400);
         }
 
-        return response()->json(['auth_url' => $authUrls[$provider]]);
+        return redirect()->away($authUrls[$provider]);
     }
 
+        // if (!Auth::check()) {
+        //     return response()->json(['error' => 'User not authenticated'], 401);
+        // }
     public function callback(Request $request, $provider)
     {
-        // Ensure user is logged in
-        if (!Auth::check()) {
-            return response()->json(['error' => 'User not authenticated'], 401);
-        }
-
         $code = $request->get('code');
         if (!$code) {
             return response()->json(['error' => 'Authorization code missing'], 400);
         }
-
-        // Define token URL for the provider
         $tokenUrls = [
-            'youtube' => 'https://oauth2.googleapis.com/token',
-            'facebook' => 'https://graph.facebook.com/v18.0/oauth/access_token',
-            'twitter' => 'https://api.twitter.com/2/oauth2/token',
+            'youtube'   => 'https://oauth2.googleapis.com/token',
+            'facebook'  => 'https://graph.facebook.com/v18.0/oauth/access_token',
+            'twitter'   => 'https://api.twitter.com/2/oauth2/token',
         ];
 
         if (!isset($tokenUrls[$provider])) {
             return response()->json(['error' => 'Invalid provider'], 400);
         }
 
-        $tokenUrl = $tokenUrls[$provider];
-
-        // Exchange code for access token
-        $response = Http::asForm()->post($tokenUrl, [
+        $response = Http::asForm()->post($tokenUrls[$provider], [
             'client_id'     => env(strtoupper($provider) . '_CLIENT_ID'),
             'client_secret' => env(strtoupper($provider) . '_CLIENT_SECRET'),
             'redirect_uri'  => route('social.auth.callback', ['provider' => $provider]),
@@ -86,26 +79,37 @@ class SocialPostAuthController extends Controller
         }
 
         $data = $response->json();
+        print_r($data);
         $accessToken = $data['access_token'] ?? null;
-        $refreshToken = $data['refresh_token'] ?? null;
-
+        $expiresIn = $data['expires_in'] ?? null;
+    
         if (!$accessToken) {
             return response()->json(['error' => 'Access token not received'], 400);
         }
+        $existingAccount = SocialAccount::where('user_id', '1')
+                                        ->where('provider', $provider)
+                                        ->first();
+    
+        if (empty($refreshToken) && $existingAccount) {
+            $refreshToken = $existingAccount->refresh_token;
+        }
 
-        // Store or update social account details linked to the authenticated user
+        $expiresAt = $expiresIn ? now()->addSeconds($expiresIn) : null;
+        echo '################';
+        print_r($data['refresh_token']);
         $socialAccount = SocialAccount::updateOrCreate(
-            ['user_id' => Auth::id(), 'provider' => $provider],
+            ['user_id' => '1', 'provider' => $provider],
             [
                 'provider_user_id' => $data['user_id'] ?? '',
-                'access_token' => $accessToken,
-                'refresh_token' => $refreshToken,
+                'access_token'     => $accessToken,
+                'refresh_token'    => $data['refresh_token'], 
+                'expires_at'       => $expiresAt,
             ]
         );
 
         return response()->json([
-            'message' => ucfirst($provider) . ' account connected successfully!',
-            'social_account' => $socialAccount
+            'message'         => ucfirst($provider) . ' account connected successfully!',
+            'social_account'  => $socialAccount
         ], 200);
-    }
+    }        
 }
